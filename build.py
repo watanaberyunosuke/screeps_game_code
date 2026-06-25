@@ -41,28 +41,30 @@ def possible_rollup_binary_paths(config):
 
     :type config: Configuration
     """
+    npm_bin_dirs = [
+        os.path.join(config.base_dir, 'node_modules', '.bin'),
+    ]
+
     npm = config.find_misc_executable('npm')
-    if npm is None:
-        raise Exception("npm not found! tried paths: {}".format(possible_rollup_binary_paths(config)))
+    if npm is not None:
+        ran_npm = subprocess.run(
+            [npm, 'prefix'],
+            capture_output=True,
+            encoding='utf-8',
+            cwd=config.base_dir,
+        )
+        if ran_npm.returncode == 0:
+            npm_bin_dir = os.path.join(ran_npm.stdout.strip(), 'node_modules', '.bin')
+            if npm_bin_dir not in npm_bin_dirs:
+                npm_bin_dirs.append(npm_bin_dir)
 
-    args = [npm, 'bin']
-    ran_npm = subprocess.run(args, capture_output=True, encoding='utf-8')
-
-    if ran_npm.returncode != 0:
-        raise Exception("npm bin failed. exit code: {}. command line '{}'. stderr: {}. stdout: {}"
-                        .format(ran_npm.returncode, "' '".join(args), ran_npm.stderr, ran_npm.stdout))
-    npm_bin_dir = ran_npm.stdout.strip()
     # if we're running on Windows, then we need to explicitly use rollup.cmd or rollup.ps1 rather than rollup - rollup will still exist, it will just be an unexecutable shell file ._.
-    if os.name == 'nt':
-        return [
-            os.path.join(npm_bin_dir, 'rollup.cmd'),
-            os.path.join(npm_bin_dir, 'rollup.ps1'),
-            os.path.join(npm_bin_dir, 'rollup'),
-        ]
-    else:
-        return [
-            os.path.join(npm_bin_dir, 'rollup'),
-        ]
+    rollup_names = ['rollup.cmd', 'rollup.ps1', 'rollup'] if os.name == 'nt' else ['rollup']
+    return [
+        os.path.join(npm_bin_dir, name)
+        for npm_bin_dir in npm_bin_dirs
+        for name in rollup_names
+    ]
 
 
 def possible_pip_binary_paths(config):
