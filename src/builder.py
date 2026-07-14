@@ -16,6 +16,11 @@ ENERGY_SOURCES = [
     STRUCTURE_STORAGE,
 ]
 
+# If a controller is this close to downgrading, upgrading it takes priority over any
+# construction site - otherwise a steady stream of building work (as happens while
+# pioneering a new room) can starve the controller of upgrades until the room is lost.
+DOWNGRADE_SAFETY_THRESHOLD = 4000
+
 
 def run_builder(creep):
     """
@@ -30,6 +35,22 @@ def run_builder(creep):
         del creep.memory.source
 
     if creep.memory.building:
+        controller = creep.room.controller
+        if (
+            controller
+            and controller.my
+            and controller.ticksToDowngrade
+            and controller.ticksToDowngrade < DOWNGRADE_SAFETY_THRESHOLD
+        ):
+            if creep.pos.inRangeTo(controller, 3):
+                result = creep.upgradeController(controller)
+                if result != OK:
+                    print("[{}] Unknown result from creep.upgradeController({}): {}".format(
+                        creep.name, controller, result))
+            else:
+                creep.moveTo(controller)
+            return
+
         if creep.memory.target:
             target = Game.getObjectById(creep.memory.target)
         else:
