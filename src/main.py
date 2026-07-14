@@ -1,6 +1,11 @@
 import builder
+import claimer
+import expansion
 import harvester
+import pioneer
+import scout
 import utrium_harvester
+
 # defs is a package which claims to export all constants and some JavaScript objects, but in reality does
 #  nothing. This is useful mainly when using an editor like PyCharm, so that it 'knows' that things like Object, Creep,
 #  Game, etc. do exist.
@@ -9,14 +14,14 @@ from defs import *
 # These are currently required for Transcrypt in order to use the following names in JavaScript.
 # Without the 'noalias' pragma, each of the following would be translated into something like 'py_Infinity' or
 #  'py_keys' in the output file.
-__pragma__('noalias', 'name')
-__pragma__('noalias', 'undefined')
-__pragma__('noalias', 'Infinity')
-__pragma__('noalias', 'keys')
-__pragma__('noalias', 'get')
-__pragma__('noalias', 'set')
-__pragma__('noalias', 'type')
-__pragma__('noalias', 'update')
+__pragma__("noalias", "name")
+__pragma__("noalias", "undefined")
+__pragma__("noalias", "Infinity")
+__pragma__("noalias", "keys")
+__pragma__("noalias", "get")
+__pragma__("noalias", "set")
+__pragma__("noalias", "type")
+__pragma__("noalias", "update")
 
 MAX_CREEPS = 15
 BUILDER_HARVESTER_RATIO = 3
@@ -24,11 +29,25 @@ BUILDER_HARVESTER_RATIO = 3
 
 def is_harvester(creep):
     role = creep.memory.role
-    return not role or role == 'harvester'
+    return not role or role == "harvester"
 
 
 def count_room_creeps(room, predicate):
     return _.sum(Game.creeps, lambda c: c.pos.roomName == room.name and predicate(c))
+
+
+def get_coordinator_room_name():
+    """
+    Picks a single owned room to be responsible for issuing expansion spawn orders each
+    tick, so that two fully-staffed rooms don't race to spawn duplicate scouts/claimers
+    for the same target room on the same tick.
+    """
+    coordinator = None
+    for name in Object.keys(Game.spawns):
+        room_name = Game.spawns[name].room.name
+        if coordinator is None or room_name < coordinator:
+            coordinator = room_name
+    return coordinator
 
 
 def harvester_body(room):
@@ -52,12 +71,20 @@ def main():
     for name in Object.keys(Game.creeps):
         creep = Game.creeps[name]
         role = creep.memory.role
-        if role == 'utrium_harvester':
+        if role == "utrium_harvester":
             utrium_harvester.run_utrium_harvester(creep)
-        elif role == 'builder':
+        elif role == "builder":
             builder.run_builder(creep)
+        elif role == "scout":
+            scout.run_scout(creep)
+        elif role == "claimer":
+            claimer.run_claimer(creep)
+        elif role == "pioneer":
+            pioneer.run_pioneer(creep)
         else:
             harvester.run_harvester(creep)
+
+    coordinator_room_name = get_coordinator_room_name()
 
     # Run each spawn
     for name in Object.keys(Game.spawns):
@@ -67,35 +94,45 @@ def main():
 
         room = spawn.room
         num_harvesters = count_room_creeps(room, is_harvester)
-        num_builders = count_room_creeps(room, lambda c: c.memory.role == 'builder')
+        num_builders = count_room_creeps(room, lambda c: c.memory.role == "builder")
         num_utrium_harvesters = count_room_creeps(
-            room, lambda c: c.memory.role == 'utrium_harvester')
+            room, lambda c: c.memory.role == "utrium_harvester"
+        )
         num_creeps = num_harvesters + num_builders + num_utrium_harvesters
 
-        if (num_utrium_harvesters < 1
-                and utrium_harvester.get_utrium_mineral(room)
-                and room.energyAvailable >= 250):
+        if (
+            num_utrium_harvesters < 1
+            and utrium_harvester.get_utrium_mineral(room)
+            and room.energyAvailable >= 250
+        ):
             spawn.createCreep(
                 [WORK, CARRY, CARRY, MOVE, MOVE],
                 None,
-                {'role': 'utrium_harvester', 'filling': True})
-        elif num_creeps < MAX_CREEPS and room.energyAvailable >= room.energyCapacityAvailable:
+                {"role": "utrium_harvester", "filling": True},
+            )
+        elif (
+            num_creeps < MAX_CREEPS
+            and room.energyAvailable >= room.energyCapacityAvailable
+        ):
             target_builders = num_harvesters // BUILDER_HARVESTER_RATIO
             if num_builders < target_builders:
                 spawn.createCreep(
-                    builder_body(room),
-                    None,
-                    {'role': 'builder', 'building': False})
+                    builder_body(room), None, {"role": "builder", "building": False}
+                )
             else:
                 spawn.createCreep(
-                    harvester_body(room),
-                    None,
-                    {'role': 'harvester', 'filling': True})
+                    harvester_body(room), None, {"role": "harvester", "filling": True}
+                )
         elif num_creeps == 0 and room.energyAvailable >= 250:
             spawn.createCreep(
-                harvester_body(room),
-                None,
-                {'role': 'harvester', 'filling': True})
+                harvester_body(room), None, {"role": "harvester", "filling": True}
+            )
+        elif num_creeps >= MAX_CREEPS and room.name == coordinator_room_name:
+            order = expansion.get_next_spawn_order(room)
+            if order:
+                body, memory = order
+                if room.energyAvailable >= _.sum(body, lambda p: BODYPART_COST[p]):
+                    spawn.createCreep(body, None, memory)
 
 
 module.exports.loop = main
