@@ -1,7 +1,9 @@
 import builder
 import claimer
+import defender
 import expansion
 import harvester
+import intel
 import pioneer
 import scout
 import utrium_harvester
@@ -62,10 +64,20 @@ def builder_body(room):
     return [WORK, CARRY, CARRY, MOVE, MOVE]
 
 
+def defender_body(room):
+    if room.energyCapacityAvailable >= 650:
+        return [ATTACK, RANGED_ATTACK, HEAL, MOVE, MOVE, MOVE]
+    elif room.energyCapacityAvailable >= 330:
+        return [ATTACK, RANGED_ATTACK, MOVE, MOVE]
+    return [ATTACK, MOVE, MOVE]
+
+
 def main():
     """
     Main game logic loop.
     """
+
+    intel.record_visible_rooms()
 
     # Run each creep
     for name in Object.keys(Game.creeps):
@@ -77,10 +89,14 @@ def main():
             builder.run_builder(creep)
         elif role == "scout":
             scout.run_scout(creep)
+        elif role == "patrol_scout":
+            scout.run_patrol_scout(creep)
         elif role == "claimer":
             claimer.run_claimer(creep)
         elif role == "pioneer":
             pioneer.run_pioneer(creep)
+        elif role == "defender":
+            defender.run_defender(creep)
         else:
             harvester.run_harvester(creep)
 
@@ -93,6 +109,8 @@ def main():
             continue
 
         room = spawn.room
+        hostile = _(room.find(FIND_HOSTILE_CREEPS)).first()
+        num_defenders = count_room_creeps(room, lambda c: c.memory.role == "defender")
         num_harvesters = count_room_creeps(room, is_harvester)
         num_builders = count_room_creeps(room, lambda c: c.memory.role == "builder")
         num_utrium_harvesters = count_room_creeps(
@@ -100,7 +118,11 @@ def main():
         )
         num_creeps = num_harvesters + num_builders + num_utrium_harvesters
 
-        if (
+        if hostile and num_defenders < 2:
+            body = defender_body(room)
+            if room.energyAvailable >= _.sum(body, lambda p: BODYPART_COST[p]):
+                spawn.createCreep(body, None, {"role": "defender"})
+        elif (
             num_utrium_harvesters < 1
             and utrium_harvester.get_utrium_mineral(room)
             and room.energyAvailable >= 250
@@ -129,6 +151,8 @@ def main():
             )
         elif num_creeps >= MAX_CREEPS and room.name == coordinator_room_name:
             order = expansion.get_next_spawn_order(room)
+            if not order and _.sum(Game.creeps, lambda c: c.memory.role == "patrol_scout") < 1:
+                order = ([MOVE], {"role": "patrol_scout"})
             if order:
                 body, memory = order
                 if room.energyAvailable >= _.sum(body, lambda p: BODYPART_COST[p]):
